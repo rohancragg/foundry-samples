@@ -5,7 +5,9 @@ applyTo: "code/**/*.tf,code/*.tfvars,setup-backend.ps1"
 
 # Terraform Operations Workflow
 
-- Run commands from the code directory unless using an explicit chdir flag.
+- Run commands from the code directory by using an explicit chdir flag.
+- Avoid issues with powershell argument parsing by using explicit command forms and avoiding Linux-style pipelines or redirects.
+- Avoid powershell parsing issues by quoting all terraform command arguments.
 - Standard sequence:
   1. terraform init (or init -reconfigure when backend changes)
   2. terraform validate

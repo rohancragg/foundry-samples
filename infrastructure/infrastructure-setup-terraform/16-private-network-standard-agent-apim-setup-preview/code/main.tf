@@ -99,6 +99,19 @@ resource "azurerm_network_security_group" "app_gateway" {
     destination_address_prefix = "*"
   }
 
+  # Required for Application Gateway v2 infrastructure management traffic
+  security_rule {
+    name                       = "AllowGatewayManagerInbound"
+    priority                   = 120
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "65200-65535"
+    source_address_prefix      = "GatewayManager"
+    destination_address_prefix = "*"
+  }
+
   ## Outbound rule to APIM backend
   security_rule {
     name                       = "AllowAPIMOutbound"
@@ -291,9 +304,8 @@ resource "azurerm_application_gateway" "app_gateway" {
   resource_group_name = azurerm_resource_group.rg.name
 
   sku {
-    name     = "WAF_v2"
-    tier     = "WAF_v2"
-    capacity = var.app_gateway_sku_capacity_min
+    name = "WAF_v2"
+    tier = "WAF_v2"
   }
 
   autoscale_configuration {
@@ -343,37 +355,13 @@ resource "azurerm_application_gateway" "app_gateway" {
     protocol                       = "Http"
   }
 
-  http_listener {
-    name                           = "https-listener"
-    frontend_ip_configuration_name = "public-ip-config"
-    frontend_port_name             = "https-port"
-    protocol                       = "Https"
-    ssl_certificate_name           = "app-gateway-cert"
-  }
-
-  request_routing_rule {
-    name                        = "http-to-https-redirect"
-    priority                    = 1
-    rule_type                   = "Basic"
-    http_listener_name          = "http-listener"
-    redirect_configuration_name = "http-to-https-redirect"
-  }
-
   request_routing_rule {
     name                       = "apim-routing-rule"
-    priority                   = 2
+    priority                   = 1
     rule_type                  = "Basic"
-    http_listener_name         = "https-listener"
+    http_listener_name         = "http-listener"
     backend_address_pool_name  = "apim-backend-pool"
     backend_http_settings_name = "apim-https-settings"
-  }
-
-  redirect_configuration {
-    name                 = "http-to-https-redirect"
-    redirect_type        = "Permanent"
-    target_listener_name = "https-listener"
-    include_path         = true
-    include_query_string = true
   }
 
   probe {
@@ -387,17 +375,8 @@ resource "azurerm_application_gateway" "app_gateway" {
     pick_host_name_from_backend_http_settings = true
   }
 
-  ssl_certificate {
-    name = "app-gateway-cert"
-    # NOTE: For production deployment, replace this with your certificate
-    # Generate a self-signed certificate using:
-    # openssl req -x509 -newkey rsa:2048 -nodes -out cert.pem -keyout key.pem -days 365
-    # openssl pkcs12 -export -in cert.pem -inkey key.pem -out cert.pfx -name "app-gateway-cert"
-    # Then base64 encode: [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes("cert.pfx")) | Out-File cert.pfx.b64
-    # And update the data value below
-    data     = base64encode(tls_self_signed_cert.app_gateway.cert_pem)
-    password = ""
-  }
+  # Temporary: HTTP listener only, to avoid requiring a PFX certificate with private key.
+  # To re-enable HTTPS listener, provide a valid PFX (or Key Vault cert secret) to ssl_certificate.
 
   # WAF policy is attached separately via firewall_policy_id (inline waf_configuration is deprecated)
   firewall_policy_id = azurerm_web_application_firewall_policy.app_gateway_waf.id
@@ -714,7 +693,8 @@ resource "azapi_resource" "storage_connection" {
       authType      = "AccessKey"
       isSharedToAll = true
       credentials = {
-        accessKeyId = azurerm_storage_account.storage.primary_access_key
+        accessKeyId     = "key1"
+        secretAccessKey = azurerm_storage_account.storage.primary_access_key
       }
       metadata = {
         ResourceId    = azurerm_storage_account.storage.id

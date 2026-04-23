@@ -73,3 +73,27 @@ variable "model_capacity" {
   type        = number
   default     = 40
 }
+
+variable "app_gateway_subnet_prefix" {
+  description = "Address prefix for Application Gateway subnet"
+  type        = string
+  default     = "10.0.3.0/24"
+}
+
+variable "app_gateway_sku_capacity_min" {
+  description = "Minimum capacity for Application Gateway WAF_v2 SKU"
+  type        = number
+  default     = 1
+}
+
+variable "app_gateway_sku_capacity_max" {
+  description = "Maximum capacity for Application Gateway WAF_v2 SKU auto-scale"
+  type        = number
+  default     = 10
+}
+
+variable "enable_app_gateway_waf" {
+  description = "Enable Web Application Firewall for Application Gateway"
+  type        = bool
+  default     = true
+}

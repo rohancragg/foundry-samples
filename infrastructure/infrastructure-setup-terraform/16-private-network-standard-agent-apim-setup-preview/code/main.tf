@@ -51,6 +51,96 @@ resource "azurerm_subnet" "subnet_apim" {
   address_prefixes     = [var.subnet_apim_prefix]
 }
 
+## Create Subnet for Application Gateway
+resource "azurerm_subnet" "subnet_app_gateway" {
+  name                 = "subnet-app-gateway"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = [var.app_gateway_subnet_prefix]
+}
+
+## Create Public IP for Application Gateway
+resource "azurerm_public_ip" "app_gateway" {
+  name                = "pip-appgw-${random_string.unique.result}"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+## NSG required for Application Gateway
+resource "azurerm_network_security_group" "app_gateway" {
+  name                = "nsg-appgw-${random_string.unique.result}"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ## Inbound rules
+  security_rule {
+    name                       = "AllowHTTPInbound"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "AllowHTTPSInbound"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  ## Outbound rule to APIM backend
+  security_rule {
+    name                       = "AllowAPIMOutbound"
+    priority                   = 100
+    direction                  = "Outbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = "*"
+    destination_address_prefix = var.subnet_apim_prefix
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "app_gateway" {
+  subnet_id                 = azurerm_subnet.subnet_app_gateway.id
+  network_security_group_id = azurerm_network_security_group.app_gateway.id
+}
+
+## Generate self-signed certificate for Application Gateway
+resource "tls_private_key" "app_gateway" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_self_signed_cert" "app_gateway" {
+  private_key_pem = tls_private_key.app_gateway.private_key_pem
+
+  subject {
+    common_name  = "app-gateway-${random_string.unique.result}.cloudapp.azure.com"
+    organization = "AI Foundry"
+  }
+
+  validity_period_hours = 8760 # 1 year
+
+  allowed_uses = [
+    "key_encipherment",
+    "digital_signature",
+    "server_auth",
+  ]
+}
+
 ## NSG required for APIM internal VNet deployment
 resource "azurerm_network_security_group" "apim" {
   name                = "nsg-apim-${random_string.unique.result}"
@@ -91,6 +181,18 @@ resource "azurerm_network_security_group" "apim" {
     source_port_range          = "*"
     destination_port_range     = "443"
     source_address_prefix      = "VirtualNetwork"
+    destination_address_prefix = "VirtualNetwork"
+  }
+
+  security_rule {
+    name                       = "AllowHTTPSFromAppGateway"
+    priority                   = 125
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "443"
+    source_address_prefix      = var.app_gateway_subnet_prefix
     destination_address_prefix = "VirtualNetwork"
   }
 
@@ -159,6 +261,165 @@ resource "azurerm_network_security_group" "apim" {
 resource "azurerm_subnet_network_security_group_association" "apim" {
   subnet_id                 = azurerm_subnet.subnet_apim.id
   network_security_group_id = azurerm_network_security_group.apim.id
+}
+
+## Create WAF Policy for Application Gateway
+resource "azurerm_web_application_firewall_policy" "app_gateway_waf" {
+  name                = "waf-policy-${random_string.unique.result}"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  managed_rules {
+    managed_rule_set {
+      version = "3.2"
+      type    = "OWASP"
+    }
+  }
+
+  policy_settings {
+    enabled                     = true
+    mode                        = "Detection"
+    file_upload_limit_in_mb     = 100
+    max_request_body_size_in_kb = 128
+  }
+}
+
+## Create Application Gateway with WAF v2
+resource "azurerm_application_gateway" "app_gateway" {
+  name                = "appgw-${random_string.unique.result}"
+  location            = var.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  sku {
+    name     = "WAF_v2"
+    tier     = "WAF_v2"
+    capacity = var.app_gateway_sku_capacity_min
+  }
+
+  autoscale_configuration {
+    min_capacity = var.app_gateway_sku_capacity_min
+    max_capacity = var.app_gateway_sku_capacity_max
+  }
+
+  gateway_ip_configuration {
+    name      = "gateway-ip-config"
+    subnet_id = azurerm_subnet.subnet_app_gateway.id
+  }
+
+  frontend_port {
+    name = "http-port"
+    port = 80
+  }
+
+  frontend_port {
+    name = "https-port"
+    port = 443
+  }
+
+  frontend_ip_configuration {
+    name                 = "public-ip-config"
+    public_ip_address_id = azurerm_public_ip.app_gateway.id
+  }
+
+  backend_address_pool {
+    name  = "apim-backend-pool"
+    fqdns = [azurerm_api_management.apim.private_ip_addresses[0]]
+  }
+
+  backend_http_settings {
+    name                                = "apim-https-settings"
+    cookie_based_affinity               = "Disabled"
+    port                                = 443
+    protocol                            = "Https"
+    request_timeout                     = 20
+    pick_host_name_from_backend_address = true
+    probe_name                          = "apim-health-probe"
+  }
+
+  http_listener {
+    name                           = "http-listener"
+    frontend_ip_configuration_name = "public-ip-config"
+    frontend_port_name             = "http-port"
+    protocol                       = "Http"
+  }
+
+  http_listener {
+    name                           = "https-listener"
+    frontend_ip_configuration_name = "public-ip-config"
+    frontend_port_name             = "https-port"
+    protocol                       = "Https"
+    ssl_certificate_name           = "app-gateway-cert"
+  }
+
+  request_routing_rule {
+    name                        = "http-to-https-redirect"
+    priority                    = 1
+    rule_type                   = "Basic"
+    http_listener_name          = "http-listener"
+    redirect_configuration_name = "http-to-https-redirect"
+  }
+
+  request_routing_rule {
+    name                       = "apim-routing-rule"
+    priority                   = 2
+    rule_type                  = "Basic"
+    http_listener_name         = "https-listener"
+    backend_address_pool_name  = "apim-backend-pool"
+    backend_http_settings_name = "apim-https-settings"
+  }
+
+  redirect_configuration {
+    name                 = "http-to-https-redirect"
+    redirect_type        = "Permanent"
+    target_listener_name = "https-listener"
+    include_path         = true
+    include_query_string = true
+  }
+
+  probe {
+    name                                      = "apim-health-probe"
+    host                                      = azurerm_api_management.apim.private_ip_addresses[0]
+    port                                      = 443
+    protocol                                  = "Https"
+    path                                      = "/status-0123456789abcdef"
+    interval                                  = 30
+    timeout                                   = 30
+    unhealthy_threshold                       = 3
+    pick_host_name_from_backend_http_settings = true
+  }
+
+  ssl_certificate {
+    name = "app-gateway-cert"
+    # NOTE: For production deployment, replace this with your certificate
+    # Generate a self-signed certificate using:
+    # openssl req -x509 -newkey rsa:2048 -nodes -out cert.pem -keyout key.pem -days 365
+    # openssl pkcs12 -export -in cert.pem -inkey key.pem -out cert.pfx -name "app-gateway-cert"
+    # Then base64 encode: [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes("cert.pfx")) | Out-File cert.pfx.b64
+    # And update the data value below
+    data     = base64encode(tls_self_signed_cert.app_gateway.cert_pem)
+    password = ""
+  }
+
+  waf_configuration {
+    enabled                  = var.enable_app_gateway_waf
+    firewall_mode            = "Detection"
+    rule_set_version         = "3.2"
+    rule_set_type            = "OWASP"
+    request_body_check       = true
+    max_request_body_size_kb = 128
+    file_upload_limit_mb     = 100
+  }
+
+  firewall_policy_id = azurerm_web_application_firewall_policy.app_gateway_waf.id
+
+  depends_on = [
+    azurerm_subnet_network_security_group_association.app_gateway,
+    azurerm_api_management.apim
+  ]
+
+  lifecycle {
+    ignore_changes = [ssl_certificate]
+  }
 }
 
 ## Create Private DNS Zones

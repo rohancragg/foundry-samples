@@ -52,3 +52,24 @@ output "notes" {
   description = "Important notes about this deployment"
   value       = "This is a complex scenario. Additional APIM API configuration, policies, and subscriptions need to be configured manually or via additional Terraform resources."
 }
+
+output "app_gateway_public_ip" {
+  description = "The public IP address of the Application Gateway"
+  value       = azurerm_public_ip.app_gateway.ip_address
+}
+
+output "app_gateway_fqdn" {
+  description = "The FQDN of the Application Gateway (DNS name)"
+  value       = azurerm_public_ip.app_gateway.fqdn
+}
+
+output "app_gateway_id" {
+  description = "The ID of the Application Gateway"
+  value       = azurerm_application_gateway.app_gateway.id
+}
+
+output "app_gateway_access_url" {
+  description = "URL to access the APIM gateway through the Application Gateway"
+  value       = "https://${azurerm_public_ip.app_gateway.ip_address}"
+  depends_on  = [azurerm_application_gateway.app_gateway]
+}

@@ -1,7 +1,7 @@
 # Example configuration for private network standard agent with API Management
 
 # Azure region
-location = "eastus2"
+location = "uksouth"
 
 # AI Foundry configuration
 ai_services_name_prefix = "foundry"
@@ -15,7 +15,7 @@ subnet_apim_prefix              = "10.0.2.0/24"
 # API Management configuration
 apim_sku             = "Developer" # Use Developer for testing, Premium for production
 apim_publisher_name  = "AI Foundry Publisher"
-apim_publisher_email = "admin@example.com"
+apim_publisher_email = "rohan.cragg@synestia.co.uk"
 
 # Model configuration
 model_name     = "gpt-4.1"

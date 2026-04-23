@@ -378,7 +378,6 @@ resource "azurerm_application_gateway" "app_gateway" {
 
   probe {
     name                                      = "apim-health-probe"
-    host                                      = azurerm_api_management.apim.private_ip_addresses[0]
     port                                      = 443
     protocol                                  = "Https"
     path                                      = "/status-0123456789abcdef"

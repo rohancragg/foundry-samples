@@ -399,16 +399,7 @@ resource "azurerm_application_gateway" "app_gateway" {
     password = ""
   }
 
-  waf_configuration {
-    enabled                  = var.enable_app_gateway_waf
-    firewall_mode            = "Detection"
-    rule_set_version         = "3.2"
-    rule_set_type            = "OWASP"
-    request_body_check       = true
-    max_request_body_size_kb = 128
-    file_upload_limit_mb     = 100
-  }
-
+  # WAF policy is attached separately via firewall_policy_id (inline waf_configuration is deprecated)
   firewall_policy_id = azurerm_web_application_firewall_policy.app_gateway_waf.id
 
   depends_on = [
@@ -722,8 +713,13 @@ resource "azapi_resource" "storage_connection" {
       target        = azurerm_storage_account.storage.primary_blob_endpoint
       authType      = "AccessKey"
       isSharedToAll = true
+      credentials = {
+        accessKeyId = azurerm_storage_account.storage.primary_access_key
+      }
       metadata = {
-        ResourceId = azurerm_storage_account.storage.id
+        ResourceId    = azurerm_storage_account.storage.id
+        ContainerName = "aifoundry"
+        AccountName   = azurerm_storage_account.storage.name
       }
     }
   }

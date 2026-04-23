@@ -23,7 +23,7 @@ locals {
 
 ## Create a resource group
 resource "azurerm_resource_group" "rg" {
-  name     = "rg-aifoundry${random_string.unique.result}"
+  name     = "${var.resource_group_name_prefix}${random_string.unique.result}"
   location = var.location
 }
 

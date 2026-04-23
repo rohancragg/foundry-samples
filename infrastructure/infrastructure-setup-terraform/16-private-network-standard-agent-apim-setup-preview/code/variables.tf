@@ -4,6 +4,12 @@ variable "location" {
   default     = "eastus2"
 }
 
+variable "resource_group_name_prefix" {
+  description = "Prefix for the resource group name"
+  type        = string
+  default     = "rg-aifoundry"
+}
+
 variable "ai_services_name_prefix" {
   description = "Prefix for AI Foundry account name"
   type        = string

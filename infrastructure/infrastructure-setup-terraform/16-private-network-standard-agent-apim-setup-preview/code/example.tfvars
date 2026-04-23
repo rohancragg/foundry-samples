@@ -3,6 +3,9 @@
 # Azure region
 location = "uksouth"
 
+# Resource group
+resource_group_name_prefix = "rg-aifoundry"
+
 # AI Foundry configuration
 ai_services_name_prefix = "foundry"
 project_name            = "private-apim-agent-project"
